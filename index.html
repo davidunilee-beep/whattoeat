@@ -36,6 +36,7 @@
     .results-heading h2 { font-size:22px; }
     .results-heading h2 span { color:#7e8971; font-size:14px; margin-left:8px; font-weight:500; }
     .results-heading p { font-size:12px; color:var(--muted); margin:0; }
+    .extra-description { color:var(--muted); font-size:13px; line-height:1.8; margin:-8px 0 20px; }
     .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:24px; align-items:start; }
     .card { position:relative; background:white; border:1px solid var(--line); border-radius:15px; overflow:hidden; }
     .card-open { position:absolute; inset:0; width:100%; border:0; border-radius:14px; background:transparent; }
@@ -104,6 +105,11 @@
       <div id="recipes" class="grid"></div>
       <div id="message" class="empty" hidden></div>
     </section>
+    <section id="extra-section" aria-labelledby="extra-title" hidden>
+      <div class="results-heading"><h2 id="extra-title">새로운 맛도 만나보세요</h2><p id="extra-count"></p></div>
+      <p id="extra-description" class="extra-description"></p>
+      <div id="extra-recipes" class="grid"></div>
+    </section>
   </main>
   <footer><div class="wrap"><span>오늘 뭐먹지? · 제철을 담은 일상</span><span>레시피·사진 출처: 식품안전나라 / menu.json</span></div></footer>
   <dialog id="recipe-dialog" class="recipe-dialog" aria-labelledby="dialog-title">
@@ -121,6 +127,9 @@
     const resultsSection = document.querySelector('#results-section');
     const recipeDialog = document.querySelector('#recipe-dialog');
     const dialogContent = document.querySelector('#dialog-content');
+    const extraSection = document.querySelector('#extra-section');
+    const extraGrid = document.querySelector('#extra-recipes');
+    const extraRecommendations = new Map();
     let dialogOpener = null;
     function closeRecipe() { recipeDialog.close(); }
     document.querySelector('.dialog-x').addEventListener('click', closeRecipe);
@@ -168,6 +177,41 @@
       }
       if (!names.length) ingredientList.append(element('span', 'small-label', '등록된 제철 재료가 없어요. 다른 달을 선택해 주세요.'));
       renderRecipes();
+      renderExtraRecipes();
+    }
+
+    function pickExtraRecipes(recipes, month) {
+      const monthly = recipes.filter(recipe => Array.isArray(recipe.months) && recipe.months.includes(month));
+      if (monthly.length > 15) return [];
+      const monthlyIds = new Set(monthly.map(recipe => recipe.id));
+      const unique = new Map();
+      for (const recipe of recipes) {
+        if (!monthlyIds.has(recipe.id)) unique.set(recipe.id, recipe);
+      }
+      const pool = [...unique.values()];
+      // Partial Fisher–Yates shuffle: sample up to five distinct recipes uniformly.
+      const count = Math.min(5, pool.length);
+      for (let i = 0; i < count; i++) {
+        const j = i + Math.floor(Math.random() * (pool.length - i));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+      return pool.slice(0, count);
+    }
+
+    function renderExtraRecipes() {
+      const month = Number(monthSelect.value);
+      extraSection.hidden = true;
+      extraGrid.replaceChildren();
+      if (!extraRecommendations.has(month)) extraRecommendations.set(month, pickExtraRecipes(data.recipes, month));
+      const extras = extraRecommendations.get(month);
+      if (!extras.length) return;
+      const monthlyCount = data.recipes.filter(recipe => Array.isArray(recipe.months) && recipe.months.includes(month)).length;
+      document.querySelector('#extra-count').textContent = `랜덤 추천 ${extras.length}개`;
+      document.querySelector('#extra-description').textContent = `${month}월의 추천 메뉴가 ${monthlyCount}개여서, 전체 레시피에서 새로운 메뉴를 골랐어요. 월·재료 조건과 관계없이 추천해 드려요.`;
+      const cards = document.createDocumentFragment();
+      extras.forEach(recipe => cards.append(createRecipeCard(recipe, '새로운 맛 · 랜덤 추천')));
+      extraGrid.append(cards);
+      extraSection.hidden = false;
     }
 
     function createPhoto(recipe, large = false) {
@@ -197,11 +241,11 @@
       return photo;
     }
 
-    function createRecipeCard(recipe) {
+    function createRecipeCard(recipe, label = `${monthSelect.value}월 제철 · ${selectedIngredient}`) {
       const card = element('article', 'card');
       const photo = createPhoto(recipe);
       const body = element('div', 'card-body');
-      body.append(element('p', 'meta', `${monthSelect.value}월 제철 · ${selectedIngredient}`), element('h3', '', recipe.name));
+      body.append(element('p', 'meta', label), element('h3', '', recipe.name));
       body.append(element('p', 'recipe-ingredients', (recipe.main_ingredients || []).join(' · ')));
       body.append(element('span', 'card-link', '레시피 자세히 보기 ↗'));
       const open = element('button', 'card-open');
@@ -281,6 +325,7 @@
         const loaded = await response.json();
         if (!Array.isArray(loaded.seasonal) || !Array.isArray(loaded.recipes)) throw new Error('Invalid menu data');
         data = loaded;
+        extraRecommendations.clear();
         monthSelect.disabled = false;
         renderIngredients();
       } catch (error) {
