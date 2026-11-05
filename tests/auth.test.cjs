@@ -29,7 +29,9 @@ function setup({ configured = true, session = null, signupSession = null, loginE
     async signOut(options) { calls.push(['logout', options]); return { error: signoutError }; }
   } };
   const context = vm.createContext({ document: { querySelector: node, body: { classList: { toggle() {}, add() {} } } }, window: { supabase: { createClient: () => client } } });
-  const source = configured ? script.replace("const SUPABASE_URL = '';", "const SUPABASE_URL = 'https://test.supabase.co';").replace("const SUPABASE_PUBLISHABLE_KEY = '';", "const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_test';") : script;
+  const source = script
+    .replace(/const SUPABASE_URL = '[^']*';/, `const SUPABASE_URL = '${configured ? 'https://test.supabase.co' : ''}';`)
+    .replace(/const SUPABASE_PUBLISHABLE_KEY = '[^']*';/, `const SUPABASE_PUBLISHABLE_KEY = '${configured ? 'sb_publishable_test' : ''}';`);
   vm.runInContext(source, context);
   return { node, calls, emit: session => stateListener('SIGNED_IN', session), user };
 }
