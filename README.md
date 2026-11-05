@@ -5,8 +5,8 @@
 
 ## Supabase 이메일 인증 연결
 
-현재 인증 UI와 클라이언트 로직은 구현되어 있으며, Supabase 프로젝트 연결 정보는 비어 있습니다.
-연결 전에는 인증 요청 버튼이 비활성화됩니다. 레시피 조회는 계속 사용할 수 있습니다.
+인증 UI와 클라이언트 로직은 `https://guigwxkzotykgbbcbzjx.supabase.co` 프로젝트에 연결되어 있습니다.
+공개용 publishable key를 사용합니다. 다른 프로젝트로 변경할 때는 아래 설정을 수정합니다.
 
 1. Supabase 프로젝트의 Connect 또는 API 설정에서 프로젝트 URL과 공개용 publishable key(또는 legacy anon key)를 확인합니다.
 2. `index.html`의 `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`에 각각 입력합니다. 이 설정은 브라우저에 공개됩니다. secret key, service_role 키, 데이터베이스 비밀번호를 넣지 마세요.
