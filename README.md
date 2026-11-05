@@ -17,9 +17,23 @@
 supabase-js v2는 jsDelivr CDN에서 로드합니다. 세션 유지·토큰 갱신과 인증 상태 변경에 따라 상단 이메일·로그아웃 표시를 갱신합니다.
 로그아웃은 현재 브라우저 세션에 적용됩니다. 이메일 또는 비밀번호를 저장소에 기록하지 마세요.
 
+## 즐겨찾기 테이블 설치
+
+공개 키는 테이블 생성 권한이 없으므로, 프로젝트 소유자가 아래 SQL을 한 번 실행해야 합니다.
+아직 이 프로젝트의 DB에서 테이블 생성 또는 실제 계정의 저장·삭제는 검증하지 않았습니다.
+
+1. [프로젝트 SQL Editor](https://supabase.com/dashboard/project/guigwxkzotykgbbcbzjx/sql/new)를 엽니다.
+2. 저장소의 `supabase/favorites.sql` 전체 내용을 붙여넣고 **Run**을 누릅니다.
+3. 웹사이트에서 로그인한 다음 레시피 상세 팝업의 ☆을 눌러 저장합니다. ★을 다시 누르면 삭제됩니다.
+4. 상단 **내 즐겨찾기**를 눌러 저장한 카드를 확인합니다. 새로고침 후에도 유지되는지 확인합니다.
+
+테이블은 `id`, `user_id`, `recipe_id`, `created_at`을 가지며, 같은 사용자가 같은 레시피를 중복 저장할 수 없습니다.
+RLS 정책은 로그인한 사용자가 자기 행만 조회·저장·삭제하도록 제한합니다. `recipe_id`는 `menu.json`의 레시피 ID입니다.
+다른 계정으로 로그인하면 이전 계정의 즐겨찾기 표시를 지우고 새 계정의 목록을 불러옵니다.
+
 ## 테스트
 
-프로젝트 폴더에서 `node --test tests/auth.test.cjs`를 실행합니다.
+프로젝트 폴더에서 `node --test tests/*.test.cjs`를 실행합니다.
 이 테스트는 모의 Supabase 클라이언트를 사용하므로, 실제 프로젝트 연결과 이메일 발송 검증은 별도로 필요합니다.
 
 공식 문서: [CDN 설치](https://supabase.com/docs/reference/javascript/installing), [이메일 인증](https://supabase.com/docs/guides/auth/passwords).
