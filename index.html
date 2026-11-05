@@ -9,7 +9,7 @@
     :root { color-scheme: light; --ink:#253e34; --green:#285447; --muted:#727b70; --paper:#faf9f4; --line:#e2e6db; }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--paper); color:var(--ink); font-family:"Pretendard","Noto Sans KR",system-ui,sans-serif; word-break:keep-all; }
-    button,select { font:inherit; }
+    button,select,input { font:inherit; }
     button,select,summary { cursor:pointer; }
     button:focus-visible,select:focus-visible,summary:focus-visible { outline:3px solid #a0b85d; outline-offset:4px; }
     .wrap { width:min(1120px, calc(100% - 48px)); margin:auto; }
@@ -18,6 +18,24 @@
     .brand { font-size:21px; font-weight:800; letter-spacing:-1px; }
     .brand span { color:#799343; margin-right:9px; }
     .month-control { display:flex; align-items:center; gap:12px; font-size:13px; }
+    .header-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:16px; }
+    .account { display:flex; align-items:center; gap:10px; min-width:0; }
+    .account-email { font-size:12px; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .account-button { border:1px solid var(--green); border-radius:9px; background:var(--green); color:white; padding:10px 16px; font-size:13px; white-space:nowrap; }
+    .account-button.secondary { background:transparent; color:var(--green); }
+    .account-notice { margin:0; padding:10px 0; font-size:13px; color:#95432e; }
+    .auth-dialog { width:min(440px, calc(100% - 32px)); }
+    .auth-body { padding:26px; }
+    .auth-description { color:var(--muted); font-size:13px; line-height:1.8; margin:10px 0 22px; }
+    .auth-field { display:flex; flex-direction:column; gap:8px; margin:17px 0; font-size:13px; font-weight:600; }
+    .auth-field input { width:100%; border:1px solid #cfd8c9; border-radius:9px; padding:12px; background:white; color:var(--ink); outline-offset:3px; }
+    .auth-field input:focus-visible { outline:2px solid #a0b85d; }
+    .auth-submit { width:100%; margin-top:8px; padding:13px; }
+    button:disabled { cursor:wait; opacity:.6; }
+    .auth-switch { display:block; margin:18px auto 0; border:0; background:transparent; color:var(--green); font-size:13px; text-decoration:underline; text-underline-offset:4px; }
+    .auth-message { font-size:13px; line-height:1.8; color:#95432e; margin:16px 0 0; }
+    .auth-message.success { color:var(--green); }
+    @media(max-width:650px) { .topbar { align-items:flex-start; flex-wrap:wrap; gap:14px; } .header-actions { gap:10px; flex:1; } .month-control label { display:none; } .account-email { max-width:140px; } }
     select { border:1px solid #cfd8c9; border-radius:9px; background:white; color:var(--green); padding:10px 34px 10px 14px; font-weight:700; }
     .intro { padding:54px 0 32px; }
     .eyebrow { font-size:11px; letter-spacing:2.5px; color:#72834c; font-weight:800; margin:0 0 17px; }
@@ -87,8 +105,12 @@
   <header>
     <div class="wrap topbar">
       <div class="brand"><span aria-hidden="true">✳</span>오늘 뭐먹지?</div>
-      <div class="month-control"><label for="month">어느 달의 식탁인가요?</label><select id="month" aria-label="제철 월 선택"></select></div>
+      <div class="header-actions">
+        <div class="month-control"><label for="month">어느 달의 식탁인가요?</label><select id="month" aria-label="제철 월 선택"></select></div>
+        <div class="account"><button id="login-button" type="button" class="account-button" aria-haspopup="dialog">로그인</button><span id="account-email" class="account-email" hidden></span><button id="logout-button" type="button" class="account-button secondary" hidden>로그아웃</button></div>
+      </div>
     </div>
+    <div class="wrap"><p id="account-notice" class="account-notice" role="status" hidden></p></div>
   </header>
   <main class="wrap">
     <section class="intro">
@@ -116,6 +138,20 @@
     <div class="dialog-toolbar"><span>오늘의 레시피</span><button type="button" class="dialog-x" aria-label="레시피 팝업 닫기" autofocus>×</button></div>
     <div id="dialog-content"></div>
   </dialog>
+  <dialog id="auth-dialog" class="recipe-dialog auth-dialog" aria-labelledby="auth-title" aria-describedby="auth-description">
+    <div class="dialog-toolbar"><span>오늘 뭐먹지? 계정</span><button id="auth-close" type="button" class="dialog-x" aria-label="로그인 팝업 닫기">×</button></div>
+    <div class="auth-body">
+      <h2 id="auth-title">로그인</h2>
+      <p id="auth-description" class="auth-description">이메일로 로그인하고 오늘의 식탁을 만나보세요.</p>
+      <form id="auth-form">
+        <label class="auth-field" for="auth-email">이메일<input id="auth-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required maxlength="254" autofocus></label>
+        <label class="auth-field" for="auth-password">비밀번호<input id="auth-password" name="password" type="password" autocomplete="current-password" required></label>
+        <button id="auth-submit" class="account-button auth-submit" type="submit">로그인</button>
+      </form>
+      <p id="auth-message" class="auth-message" role="status" aria-live="polite" hidden></p>
+      <button id="auth-switch" class="auth-switch" type="button">처음이신가요? 회원가입</button>
+    </div>
+  </dialog>
   <script>
     'use strict';
     const monthSelect = document.querySelector('#month');
@@ -134,7 +170,7 @@
     function closeRecipe() { recipeDialog.close(); }
     document.querySelector('.dialog-x').addEventListener('click', closeRecipe);
     recipeDialog.addEventListener('close', () => {
-      document.body.classList.remove('modal-open');
+      document.body.classList.toggle('modal-open', document.querySelector('#auth-dialog').open);
       dialogContent.replaceChildren();
       if (dialogOpener?.isConnected) dialogOpener.focus({ preventScroll: true });
       dialogOpener = null;
@@ -344,6 +380,171 @@
     }
     monthSelect.addEventListener('change', renderIngredients);
     loadData();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script id="auth-script">
+    'use strict';
+    // Supabase Dashboard > Connect: use only the public project URL and
+    // publishable (or legacy anon) key here. Never use secret/service_role keys.
+    const SUPABASE_URL = '';
+    const SUPABASE_PUBLISHABLE_KEY = '';
+
+    const authDialog = document.querySelector('#auth-dialog');
+    const authForm = document.querySelector('#auth-form');
+    const authEmail = document.querySelector('#auth-email');
+    const authPassword = document.querySelector('#auth-password');
+    const authSubmit = document.querySelector('#auth-submit');
+    const authSwitch = document.querySelector('#auth-switch');
+    const authMessage = document.querySelector('#auth-message');
+    const loginButton = document.querySelector('#login-button');
+    const logoutButton = document.querySelector('#logout-button');
+    const accountEmail = document.querySelector('#account-email');
+    const accountNotice = document.querySelector('#account-notice');
+    let authClient = null;
+    let authMode = 'login';
+    let authBusy = false;
+    let authReady = false;
+
+    function showAuthMessage(text, success = false) {
+      authMessage.textContent = text;
+      authMessage.classList.toggle('success', success);
+      authMessage.hidden = !text;
+    }
+
+    function setAuthBusy(busy) {
+      authBusy = busy;
+      authSubmit.disabled = busy || !authReady;
+      authSwitch.disabled = busy;
+      authEmail.disabled = busy;
+      authPassword.disabled = busy;
+      authForm.setAttribute('aria-busy', String(busy));
+      authSubmit.textContent = busy ? '처리 중…' : authMode === 'login' ? '로그인' : '회원가입';
+    }
+
+    function setAuthMode(mode) {
+      authMode = mode;
+      const signup = mode === 'signup';
+      document.querySelector('#auth-title').textContent = signup ? '회원가입' : '로그인';
+      document.querySelector('#auth-description').textContent = signup ? '이메일과 비밀번호로 계정을 만들어 주세요.' : '이메일로 로그인하고 오늘의 식탁을 만나보세요.';
+      authPassword.autocomplete = signup ? 'new-password' : 'current-password';
+      authPassword.minLength = signup ? 6 : 1;
+      authPassword.value = '';
+      authSwitch.textContent = signup ? '이미 계정이 있나요? 로그인' : '처음이신가요? 회원가입';
+      showAuthMessage(authReady ? '' : '로그인 서비스를 준비 중이에요. 잠시 후 다시 이용해 주세요.');
+      setAuthBusy(false);
+    }
+
+    function renderAuthUser(user) {
+      loginButton.hidden = Boolean(user);
+      accountEmail.hidden = !user;
+      logoutButton.hidden = !user;
+      accountEmail.textContent = user?.email || '';
+      accountEmail.title = user?.email || '';
+      if (user && authDialog.open) authDialog.close();
+    }
+
+    function friendlyAuthError(error) {
+      const code = error?.code;
+      if (code === 'invalid_credentials') return '이메일 또는 비밀번호를 확인해 주세요.';
+      if (code === 'email_not_confirmed') return '이메일의 인증 링크를 먼저 눌러 주세요.';
+      if (code === 'user_already_exists') return '이미 가입된 이메일이에요. 로그인으로 전환해 주세요.';
+      if (code === 'weak_password') return '비밀번호가 보안 기준에 맞지 않아요. 더 긴 비밀번호와 숫자·기호를 사용해 주세요.';
+      if (code === 'signup_disabled') return '현재 신규 회원가입을 받지 않고 있어요.';
+      if (code === 'email_address_invalid' || code === 'validation_failed') return '이메일 형식과 입력 내용을 확인해 주세요.';
+      if (error?.status === 429 || code?.includes('rate_limit')) return '요청이 많아요. 잠시 후 다시 시도해 주세요.';
+      return '요청을 완료하지 못했어요. 연결 상태를 확인하고 다시 시도해 주세요.';
+    }
+
+    loginButton.addEventListener('click', () => {
+      accountNotice.hidden = true;
+      if (!authBusy) setAuthMode('login');
+      authDialog.showModal();
+      document.body.classList.add('modal-open');
+      if (!authReady) showAuthMessage(authClient ? '로그인 상태를 확인하고 있어요. 잠시 후 다시 시도해 주세요.' : '로그인 서비스를 준비 중이에요. 잠시 후 다시 이용해 주세요.');
+    });
+    document.querySelector('#auth-close').addEventListener('click', () => authDialog.close());
+    authDialog.addEventListener('close', () => {
+      authPassword.value = '';
+      document.body.classList.toggle('modal-open', document.querySelector('#recipe-dialog').open);
+      if (!loginButton.hidden) loginButton.focus({ preventScroll: true });
+    });
+    authSwitch.addEventListener('click', () => {
+      if (!authBusy) setAuthMode(authMode === 'login' ? 'signup' : 'login');
+    });
+
+    authForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (authBusy || !authForm.reportValidity()) return;
+      if (!authClient || !authReady) {
+        showAuthMessage('로그인 서비스를 준비 중이에요. 잠시 후 다시 이용해 주세요.');
+        return;
+      }
+      const mode = authMode;
+      const credentials = { email: authEmail.value.trim(), password: authPassword.value };
+      showAuthMessage('');
+      setAuthBusy(true);
+      try {
+        const { data, error } = mode === 'signup'
+          ? await authClient.auth.signUp(credentials)
+          : await authClient.auth.signInWithPassword(credentials);
+        if (error) throw error;
+        authPassword.value = '';
+        if (data.session?.user) {
+          renderAuthUser(data.session.user);
+        } else if (mode === 'signup') {
+          showAuthMessage('이메일을 확인해 주세요. 가입 안내 메일의 인증 링크를 누른 뒤 로그인할 수 있어요.', true);
+        } else {
+          showAuthMessage('로그인 상태를 확인하지 못했어요. 다시 시도해 주세요.');
+        }
+      } catch (error) {
+        showAuthMessage(friendlyAuthError(error));
+      } finally {
+        credentials.password = '';
+        setAuthBusy(false);
+      }
+    });
+
+    logoutButton.addEventListener('click', async () => {
+      if (!authClient || logoutButton.disabled) return;
+      logoutButton.disabled = true;
+      accountNotice.hidden = true;
+      try {
+        const { error } = await authClient.auth.signOut({ scope: 'local' });
+        if (error) throw error;
+        renderAuthUser(null);
+      } catch {
+        accountNotice.textContent = '로그아웃하지 못했어요. 잠시 후 다시 시도해 주세요.';
+        accountNotice.hidden = false;
+      } finally {
+        logoutButton.disabled = false;
+      }
+    });
+
+    async function initializeAuth() {
+      setAuthBusy(false);
+      if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY || !window.supabase?.createClient) return;
+      loginButton.disabled = true;
+      let stateReceived = false;
+      try {
+        authClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+          auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+        });
+        authClient.auth.onAuthStateChange((_event, session) => {
+          stateReceived = true;
+          renderAuthUser(session?.user || null);
+        });
+        const { data, error } = await authClient.auth.getSession();
+        if (error) throw error;
+        if (!stateReceived) renderAuthUser(data.session?.user || null);
+        authReady = true;
+      } catch {
+        authReady = false;
+      } finally {
+        loginButton.disabled = false;
+        setAuthBusy(false);
+      }
+    }
+    initializeAuth();
   </script>
 </body>
 </html>
