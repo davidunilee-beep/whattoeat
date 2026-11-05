@@ -24,6 +24,10 @@
     .account-button { border:1px solid var(--green); border-radius:9px; background:var(--green); color:white; padding:10px 16px; font-size:13px; white-space:nowrap; }
     .account-button.secondary { background:transparent; color:var(--green); }
     .account-notice { margin:0; padding:10px 0; font-size:13px; color:#95432e; }
+    .dialog-actions { display:flex; align-items:center; gap:10px; }
+    .favorite-star { border:1px solid #cfd8c9; border-radius:50%; width:38px; height:38px; background:white; color:var(--green); font-size:25px; line-height:1; }
+    .favorite-star[aria-pressed="true"] { color:#aa751c; background:#fff5da; border-color:#e4cc91; }
+    .favorite-feedback { padding:12px 20px; margin:0; background:#edf2e5; color:var(--green); font-size:13px; line-height:1.7; }
     .auth-dialog { width:min(440px, calc(100% - 32px)); }
     .auth-body { padding:26px; }
     .auth-description { color:var(--muted); font-size:13px; line-height:1.8; margin:10px 0 22px; }
@@ -107,6 +111,7 @@
       <div class="brand"><span aria-hidden="true">✳</span>오늘 뭐먹지?</div>
       <div class="header-actions">
         <div class="month-control"><label for="month">어느 달의 식탁인가요?</label><select id="month" aria-label="제철 월 선택"></select></div>
+        <button id="favorites-button" type="button" class="account-button secondary" aria-pressed="false">내 즐겨찾기</button>
         <div class="account"><button id="login-button" type="button" class="account-button" aria-haspopup="dialog">로그인</button><span id="account-email" class="account-email" hidden></span><button id="logout-button" type="button" class="account-button secondary" hidden>로그아웃</button></div>
       </div>
     </div>
@@ -132,10 +137,16 @@
       <p id="extra-description" class="extra-description"></p>
       <div id="extra-recipes" class="grid"></div>
     </section>
+    <section id="favorites-section" aria-labelledby="favorites-title" hidden>
+      <div class="results-heading"><h2 id="favorites-title">내 즐겨찾기</h2><p id="favorites-count" role="status" aria-live="polite"></p></div>
+      <div id="favorites-message" class="empty" hidden></div>
+      <div id="favorites-grid" class="grid"></div>
+    </section>
   </main>
   <footer><div class="wrap"><span>오늘 뭐먹지? · 제철을 담은 일상</span><span>레시피·사진 출처: 식품안전나라 / menu.json</span></div></footer>
   <dialog id="recipe-dialog" class="recipe-dialog" aria-labelledby="dialog-title">
-    <div class="dialog-toolbar"><span>오늘의 레시피</span><button type="button" class="dialog-x" aria-label="레시피 팝업 닫기" autofocus>×</button></div>
+    <div class="dialog-toolbar"><span>오늘의 레시피</span><div class="dialog-actions"><button id="favorite-star" type="button" class="favorite-star" aria-label="즐겨찾기 저장" aria-pressed="false">☆</button><button type="button" class="dialog-x" aria-label="레시피 팝업 닫기" autofocus>×</button></div></div>
+    <p id="favorite-feedback" class="favorite-feedback" role="status" aria-live="polite" hidden></p>
     <div id="dialog-content"></div>
   </dialog>
   <dialog id="auth-dialog" class="recipe-dialog auth-dialog" aria-labelledby="auth-title" aria-describedby="auth-description">
@@ -152,7 +163,7 @@
       <button id="auth-switch" class="auth-switch" type="button">처음이신가요? 회원가입</button>
     </div>
   </dialog>
-  <script>
+  <script id="recipes-script">
     'use strict';
     const monthSelect = document.querySelector('#month');
     const ingredientList = document.querySelector('#ingredients');
@@ -166,13 +177,16 @@
     const extraSection = document.querySelector('#extra-section');
     const extraGrid = document.querySelector('#extra-recipes');
     const extraRecommendations = new Map();
+    let activeRecipe = null;
     let dialogOpener = null;
     function closeRecipe() { recipeDialog.close(); }
     document.querySelector('.dialog-x').addEventListener('click', closeRecipe);
     recipeDialog.addEventListener('close', () => {
+      activeRecipe = null;
       document.body.classList.toggle('modal-open', document.querySelector('#auth-dialog').open);
       dialogContent.replaceChildren();
       if (dialogOpener?.isConnected) dialogOpener.focus({ preventScroll: true });
+      else if (favoritesView) favoritesButton.focus({ preventScroll: true });
       dialogOpener = null;
     });
     let data = { seasonal: [], recipes: [] };
@@ -214,6 +228,7 @@
       if (!names.length) ingredientList.append(element('span', 'small-label', '등록된 제철 재료가 없어요. 다른 달을 선택해 주세요.'));
       renderRecipes();
       renderExtraRecipes();
+      if (favoritesView) renderFavorites();
     }
 
     function pickExtraRecipes(recipes, month) {
@@ -247,7 +262,7 @@
       const cards = document.createDocumentFragment();
       extras.forEach(recipe => cards.append(createRecipeCard(recipe, '새로운 맛 · 랜덤 추천')));
       extraGrid.append(cards);
-      extraSection.hidden = false;
+      extraSection.hidden = favoritesView;
     }
 
     function createPhoto(recipe, large = false) {
@@ -294,6 +309,9 @@
     }
 
     function openRecipe(recipe, opener) {
+      activeRecipe = recipe;
+      document.querySelector('#favorite-feedback').hidden = true;
+      updateFavoriteStar();
       dialogOpener = opener;
       const body = element('div', 'dialog-body');
       const title = element('h2', '', recipe.name);
@@ -378,7 +396,161 @@
         resultsSection.setAttribute('aria-busy', 'false');
       }
     }
-    monthSelect.addEventListener('change', renderIngredients);
+    // Favorites use the authenticated user's session. Pending requests from an
+    // earlier account are ignored, and writes never optimistically mark a save.
+    let favoritesClient = null;
+    let favoritesUser = null;
+    let favoriteIds = new Set();
+    let favoritesView = false;
+    let favoritesLoading = false;
+    let favoritesLoaded = false;
+    let favoritesError = '';
+    let favoritesEpoch = 0;
+    let favoritesRequest = 0;
+    let favoriteWrite = null;
+    const favoriteStar = document.querySelector('#favorite-star');
+    const favoriteFeedback = document.querySelector('#favorite-feedback');
+    const favoritesSection = document.querySelector('#favorites-section');
+    const favoritesButton = document.querySelector('#favorites-button');
+
+    function favoriteNotice(text) {
+      favoriteFeedback.textContent = text;
+      favoriteFeedback.hidden = !text;
+    }
+
+    function updateFavoriteStar() {
+      const saved = Boolean(activeRecipe && favoriteIds.has(Number(activeRecipe.id)));
+      favoriteStar.textContent = saved ? '★' : '☆';
+      favoriteStar.setAttribute('aria-pressed', String(saved));
+      favoriteStar.setAttribute('aria-label', saved ? '즐겨찾기 삭제' : '즐겨찾기 저장');
+      favoriteStar.disabled = Boolean(favoritesUser && (favoritesLoading || favoriteWrite));
+    }
+
+    function favoritesAuthChanged(user) {
+      if (favoritesUser?.id === user?.id) return;
+      favoritesEpoch++;
+      favoritesRequest++;
+      favoritesUser = user;
+      favoriteIds = new Set();
+      favoritesLoaded = false;
+      favoritesLoading = false;
+      favoritesError = '';
+      favoriteWrite = null;
+      if (recipeDialog.open) favoriteNotice(user ? '' : '로그인하면 즐겨찾기를 저장할 수 있어요');
+      updateFavoriteStar();
+      renderFavorites();
+      if (user && favoritesClient) void loadFavorites();
+    }
+
+    async function loadFavorites() {
+      if (!favoritesClient || !favoritesUser) return;
+      const epoch = favoritesEpoch;
+      const request = ++favoritesRequest;
+      const userId = favoritesUser.id;
+      favoritesLoading = true;
+      favoritesError = '';
+      updateFavoriteStar();
+      renderFavorites();
+      try {
+        const { data: rows, error } = await favoritesClient.from('favorites')
+          .select('recipe_id').eq('user_id', userId).order('created_at', { ascending: false }).limit(1000);
+        if (epoch !== favoritesEpoch || request !== favoritesRequest) return;
+        if (error) throw error;
+        favoriteIds = new Set((rows || []).map(row => Number(row.recipe_id)));
+        favoritesLoaded = true;
+      } catch {
+        if (epoch !== favoritesEpoch || request !== favoritesRequest) return;
+        favoritesLoaded = false;
+        favoritesError = '즐겨찾기를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';
+        if (recipeDialog.open) favoriteNotice(favoritesError);
+      } finally {
+        if (epoch === favoritesEpoch && request === favoritesRequest) {
+          favoritesLoading = false;
+          updateFavoriteStar();
+          renderFavorites();
+        }
+      }
+    }
+
+    function setFavoritesView(show) {
+      favoritesView = show;
+      favoritesSection.hidden = !show;
+      resultsSection.hidden = show;
+      document.querySelector('.ingredients-panel').hidden = show;
+      favoritesButton.textContent = show ? '레시피로 돌아가기' : '내 즐겨찾기';
+      favoritesButton.setAttribute('aria-pressed', String(show));
+      if (show) { extraSection.hidden = true; renderFavorites(); }
+      else renderExtraRecipes();
+    }
+
+    function renderFavorites() {
+      if (!favoritesView) return;
+      const grid = document.querySelector('#favorites-grid');
+      const notice = document.querySelector('#favorites-message');
+      const count = document.querySelector('#favorites-count');
+      grid.replaceChildren();
+      notice.replaceChildren();
+      notice.hidden = true;
+      favoritesSection.setAttribute('aria-busy', String(favoritesLoading));
+      count.textContent = '';
+      const showNotice = text => { notice.textContent = text; notice.hidden = false; };
+      if (!favoritesUser) { showNotice('로그인하면 즐겨찾기를 저장할 수 있어요'); return; }
+      if (favoritesLoading) { showNotice('저장한 레시피를 불러오는 중이에요…'); return; }
+      if (favoritesError) {
+        showNotice(favoritesError);
+        const retry = element('button', 'retry', '다시 시도');
+        retry.type = 'button';
+        retry.addEventListener('click', () => { if (!favoriteWrite) void loadFavorites(); });
+        notice.append(retry);
+        return;
+      }
+      if (!favoritesLoaded) { showNotice('즐겨찾기를 준비 중이에요…'); return; }
+      const recipes = data.recipes.filter(recipe => favoriteIds.has(Number(recipe.id)));
+      count.textContent = `저장한 레시피 ${recipes.length}개`;
+      if (!recipes.length) { showNotice('저장한 레시피가 없어요. 레시피 상세 화면에서 ☆을 눌러 보세요.'); return; }
+      const cards = document.createDocumentFragment();
+      recipes.forEach(recipe => cards.append(createRecipeCard(recipe, '내가 저장한 레시피')));
+      grid.append(cards);
+    }
+
+    async function toggleFavorite() {
+      if (!activeRecipe) return;
+      if (!favoritesUser) { favoriteNotice('로그인하면 즐겨찾기를 저장할 수 있어요'); return; }
+      if (!favoritesClient || favoritesLoading || favoriteWrite) return;
+      if (!favoritesLoaded) { await loadFavorites(); return; }
+      const recipeId = Number(activeRecipe.id);
+      const userId = favoritesUser.id;
+      const epoch = favoritesEpoch;
+      const removing = favoriteIds.has(recipeId);
+      const operation = {};
+      favoriteWrite = operation;
+      favoritesRequest++;
+      updateFavoriteStar();
+      favoriteNotice('');
+      try {
+        const result = removing
+          ? await favoritesClient.from('favorites').delete().eq('user_id', userId).eq('recipe_id', recipeId).select('recipe_id')
+          : await favoritesClient.from('favorites').insert({ user_id: userId, recipe_id: recipeId }).select('recipe_id').single();
+        if (epoch !== favoritesEpoch) return;
+        if (result.error && !(result.error.code === '23505' && !removing)) throw result.error;
+        if (!removing && !result.error && Number(result.data?.recipe_id) !== recipeId) throw new Error('Save unconfirmed');
+        if (removing) favoriteIds.delete(recipeId);
+        else favoriteIds.add(recipeId);
+        if (Number(activeRecipe?.id) === recipeId) favoriteNotice(removing ? '즐겨찾기에서 삭제했어요.' : '즐겨찾기에 저장했어요.');
+        renderFavorites();
+      } catch {
+        if (epoch === favoritesEpoch && Number(activeRecipe?.id) === recipeId) favoriteNotice('즐겨찾기를 변경하지 못했어요. 잠시 후 다시 시도해 주세요.');
+      } finally {
+        if (favoriteWrite === operation) { favoriteWrite = null; updateFavoriteStar(); }
+      }
+    }
+
+    favoriteStar.addEventListener('click', toggleFavorite);
+    favoritesButton.addEventListener('click', () => {
+      setFavoritesView(!favoritesView);
+      if (favoritesView && favoritesUser && !favoriteWrite && !favoritesLoading) void loadFavorites();
+    });
+    monthSelect.addEventListener('change', () => { setFavoritesView(false); renderIngredients(); });
     loadData();
   </script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -441,6 +613,8 @@
       accountEmail.textContent = user?.email || '';
       accountEmail.title = user?.email || '';
       if (user && authDialog.open) authDialog.close();
+      // Avoid making Supabase requests inside its synchronous auth callback.
+      if (typeof favoritesAuthChanged === 'function') setTimeout(() => favoritesAuthChanged(user), 0);
     }
 
     function friendlyAuthError(error) {
@@ -529,6 +703,7 @@
         authClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
           auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
         });
+        if (typeof favoritesClient !== 'undefined') favoritesClient = authClient;
         authClient.auth.onAuthStateChange((_event, session) => {
           stateReceived = true;
           renderAuthUser(session?.user || null);
