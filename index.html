@@ -37,7 +37,10 @@
     .results-heading h2 span { color:#7e8971; font-size:14px; margin-left:8px; font-weight:500; }
     .results-heading p { font-size:12px; color:var(--muted); margin:0; }
     .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:24px; align-items:start; }
-    .card { background:white; border:1px solid var(--line); border-radius:15px; overflow:hidden; }
+    .card { position:relative; background:white; border:1px solid var(--line); border-radius:15px; overflow:hidden; }
+    .card-open { position:absolute; inset:0; width:100%; border:0; border-radius:14px; background:transparent; }
+    .card-open:focus-visible { outline-offset:-4px; }
+    .card-link { display:block; border-top:1px solid #edf0e8; padding-top:13px; color:var(--green); font-size:13px; font-weight:600; }
     .photo { position:relative; aspect-ratio:1.5; background:#e9eddf; display:grid; place-items:center; overflow:hidden; }
     .photo img { width:100%; height:100%; object-fit:cover; transition:transform .35s; }
     .card:hover .photo img { transform:scale(1.035); }
@@ -48,8 +51,21 @@
     .meta { font-size:11px; color:#7c8b67; margin:0 0 8px; }
     h3 { font-size:19px; letter-spacing:-.6px; margin:0; line-height:1.5; }
     .recipe-ingredients { color:var(--muted); font-size:12px; line-height:1.7; margin:10px 0 17px; }
-    details { border-top:1px solid #edf0e8; padding-top:13px; font-size:13px; }
-    summary { color:var(--green); font-weight:600; }
+    body.modal-open { overflow:hidden; }
+    .recipe-dialog { width:min(760px, calc(100% - 32px)); max-height:90vh; max-height:90dvh; padding:0; border:0; border-radius:20px; background:var(--paper); color:var(--ink); overflow:auto; overscroll-behavior:contain; box-shadow:0 24px 90px #10261d55; }
+    .recipe-dialog::backdrop { background:#142b23b3; }
+    .dialog-toolbar { position:sticky; top:0; z-index:2; display:flex; justify-content:space-between; align-items:center; background:var(--paper); padding:12px 20px; border-bottom:1px solid var(--line); font-size:13px; }
+    .dialog-x { width:36px; height:36px; border:1px solid var(--line); border-radius:50%; background:white; color:var(--green); font-size:24px; line-height:1; }
+    .dialog-photo { aspect-ratio:16/9; }
+    .dialog-photo img { object-fit:contain; }
+    .dialog-body { padding:28px clamp(20px,5vw,40px) 32px; }
+    .dialog-body h2 { font-size:clamp(23px,4vw,30px); line-height:1.4; margin-bottom:12px; }
+    .dialog-meta { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 26px; }
+    .dialog-meta span { background:#eaf0e1; border-radius:6px; padding:6px 10px; font-size:12px; }
+    .dialog-body .instructions h3 { font-size:16px; margin:24px 0 8px; }
+    .dialog-body .instructions { font-size:14px; }
+    .recipe-tip { background:#edf2e5; border-radius:12px; padding:1px 18px 18px; margin-top:24px; }
+    .dialog-close { width:100%; border:0; border-radius:10px; padding:13px; background:var(--green); color:white; font-weight:600; margin-top:28px; }
     .instructions { color:#65705e; line-height:1.8; }
     .instructions h4 { margin:18px 0 6px; color:var(--ink); }
     .instructions p { white-space:pre-line; overflow-wrap:anywhere; margin:0; }
@@ -90,6 +106,10 @@
     </section>
   </main>
   <footer><div class="wrap"><span>오늘 뭐먹지? · 제철을 담은 일상</span><span>레시피·사진 출처: 식품안전나라 / menu.json</span></div></footer>
+  <dialog id="recipe-dialog" class="recipe-dialog" aria-labelledby="dialog-title">
+    <div class="dialog-toolbar"><span>오늘의 레시피</span><button type="button" class="dialog-x" aria-label="레시피 팝업 닫기" autofocus>×</button></div>
+    <div id="dialog-content"></div>
+  </dialog>
   <script>
     'use strict';
     const monthSelect = document.querySelector('#month');
@@ -99,6 +119,17 @@
     const resultCount = document.querySelector('#result-count');
     const resultsTitle = document.querySelector('#results-title');
     const resultsSection = document.querySelector('#results-section');
+    const recipeDialog = document.querySelector('#recipe-dialog');
+    const dialogContent = document.querySelector('#dialog-content');
+    let dialogOpener = null;
+    function closeRecipe() { recipeDialog.close(); }
+    document.querySelector('.dialog-x').addEventListener('click', closeRecipe);
+    recipeDialog.addEventListener('close', () => {
+      document.body.classList.remove('modal-open');
+      dialogContent.replaceChildren();
+      if (dialogOpener?.isConnected) dialogOpener.focus({ preventScroll: true });
+      dialogOpener = null;
+    });
     let data = { seasonal: [], recipes: [] };
     let selectedIngredient = null;
     for (let month = 1; month <= 12; month++) {
@@ -139,16 +170,16 @@
       renderRecipes();
     }
 
-    function createRecipeCard(recipe) {
-      const card = element('article', 'card');
+    function createPhoto(recipe, large = false) {
       const photo = element('div', 'photo');
+      if (large) photo.classList.add('dialog-photo');
       const fallback = element('div', 'fallback');
       fallback.append(element('span', '', '✳'), document.createTextNode('맛있는 한 끼를 준비해요'));
       photo.append(fallback);
       if (recipe.image) {
         const img = element('img');
         img.alt = recipe.name;
-        img.loading = 'lazy';
+        img.loading = large ? 'eager' : 'lazy';
         img.decoding = 'async';
         img.addEventListener('error', () => { img.remove(); fallback.hidden = false; });
         img.addEventListener('load', () => { fallback.hidden = true; });
@@ -163,24 +194,56 @@
         } catch { /* Keep the image placeholder. */ }
       }
       photo.append(element('span', 'category', recipe.category || '요리'));
+      return photo;
+    }
+
+    function createRecipeCard(recipe) {
+      const card = element('article', 'card');
+      const photo = createPhoto(recipe);
       const body = element('div', 'card-body');
       body.append(element('p', 'meta', `${monthSelect.value}월 제철 · ${selectedIngredient}`), element('h3', '', recipe.name));
       body.append(element('p', 'recipe-ingredients', (recipe.main_ingredients || []).join(' · ')));
-      const details = element('details');
-      details.append(element('summary', '', '만드는 방법 보기'));
+      body.append(element('span', 'card-link', '레시피 자세히 보기 ↗'));
+      const open = element('button', 'card-open');
+      open.type = 'button';
+      open.setAttribute('aria-label', `${recipe.name} 레시피 보기`);
+      open.setAttribute('aria-haspopup', 'dialog');
+      open.addEventListener('click', () => openRecipe(recipe, open));
+      card.append(photo, body, open);
+      return card;
+    }
+
+    function openRecipe(recipe, opener) {
+      dialogOpener = opener;
+      const body = element('div', 'dialog-body');
+      const title = element('h2', '', recipe.name);
+      title.id = 'dialog-title';
+      const meta = element('div', 'dialog-meta');
+      meta.append(element('span', '', `요리종류 · ${recipe.category || '미등록'}`), element('span', '', `조리방법 · ${recipe.method || '미등록'}`));
+      body.append(title, meta);
       const instructions = element('div', 'instructions');
-      instructions.append(element('h4', '', '재료'), element('p', '', recipe.ingredients_text || '등록된 재료 설명이 없어요.'));
+      instructions.append(element('h3', '', '재료'), element('p', '', recipe.ingredients_text || '등록된 재료 설명이 없어요.'));
+      instructions.append(element('h3', '', '조리순서'));
       if (Array.isArray(recipe.steps) && recipe.steps.length) {
-        instructions.append(element('h4', '', '만드는 순서'));
         const steps = element('ol');
         for (const step of recipe.steps) steps.append(element('li', '', step));
         instructions.append(steps);
+      } else {
+        instructions.append(element('p', '', '등록된 조리순서가 없어요.'));
       }
-      if (recipe.tip) instructions.append(element('h4', '', '요리 팁'), element('p', '', recipe.tip));
-      details.append(instructions);
-      body.append(details);
-      card.append(photo, body);
-      return card;
+      if (typeof recipe.tip === 'string' && recipe.tip.trim()) {
+        const tip = element('aside', 'recipe-tip');
+        tip.append(element('h3', '', '💡 요리 팁'), element('p', '', recipe.tip));
+        instructions.append(tip);
+      }
+      const close = element('button', 'dialog-close', '닫기');
+      close.type = 'button';
+      close.addEventListener('click', closeRecipe);
+      body.append(instructions, close);
+      dialogContent.replaceChildren(createPhoto(recipe, true), body);
+      recipeDialog.showModal();
+      document.body.classList.add('modal-open');
+      recipeDialog.scrollTop = 0;
     }
 
     function renderRecipes() {
